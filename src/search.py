@@ -1,3 +1,15 @@
+import os
+from dotenv import load_dotenv
+
+#from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_postgres import PGVector
+
+load_dotenv()
+for k in ("GOOGLE_EMBEDDING_MODEL", "DATABASE_URL","PG_VECTOR_COLLECTION_NAME"):
+    if not os.getenv(k):
+        raise RuntimeError(f"Environment variable {k} is not set")
+
 PROMPT_TEMPLATE = """
 CONTEXTO:
 {contexto}
@@ -26,4 +38,29 @@ RESPONDA A "PERGUNTA DO USUÁRIO"
 """
 
 def search_prompt(question=None):
-    pass
+  query = "Tell me more about the gpt-5 thinking evaluation and performance results comparing to gpt-4"
+
+  #embeddings = OpenAIEmbeddings(model=os.getenv("OPENAI_EMBEDDING_MODEL","text-embedding-3-small"))
+  embeddings = GoogleGenerativeAIEmbeddings(model=os.getenv("GOOGLE_EMBEDDING_MODEL","models/embedding-001"))
+
+  store = PGVector(
+      embeddings=embeddings,
+      collection_name=os.getenv("PG_VECTOR_COLLECTION_NAME"),
+      connection=os.getenv("DATABASE_URL"),
+      use_jsonb=True,
+  )
+
+  results = store.similarity_search_with_score(query, k=3)
+
+  for i, (doc, score) in enumerate(results, start=1):
+      print("="*50)
+      print(f"Resultado {i} (score: {score:.2f}):")
+      print("="*50)
+
+      print("\nTexto:\n")
+      print(doc.page_content.strip())
+
+      print("\nMetadados:\n")
+      for k, v in doc.metadata.items():
+          print(f"{k}: {v}")
+  return results
