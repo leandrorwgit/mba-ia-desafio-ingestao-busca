@@ -1,9 +1,9 @@
 import os
 from dotenv import load_dotenv
 
-#from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_postgres import PGVector
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 for k in ("GOOGLE_EMBEDDING_MODEL", "DATABASE_URL","PG_VECTOR_COLLECTION_NAME"):
@@ -38,9 +38,10 @@ RESPONDA A "PERGUNTA DO USUÁRIO"
 """
 
 def search_prompt(question=None):
-  query = "Tell me more about the gpt-5 thinking evaluation and performance results comparing to gpt-4"
-
-  #embeddings = OpenAIEmbeddings(model=os.getenv("OPENAI_EMBEDDING_MODEL","text-embedding-3-small"))
+  if not question:
+      return None
+    
+  # Busca similaridade no PGVector
   embeddings = GoogleGenerativeAIEmbeddings(model=os.getenv("GOOGLE_EMBEDDING_MODEL","models/embedding-001"))
 
   store = PGVector(
@@ -50,17 +51,36 @@ def search_prompt(question=None):
       use_jsonb=True,
   )
 
-  results = store.similarity_search_with_score(query, k=3)
+  results = store.similarity_search_with_score(question, k=10)
+  if not results:
+      return "Nenhum resultado encontrado."
 
+  # Formata contexto
+  array_contexto = []
   for i, (doc, score) in enumerate(results, start=1):
-      print("="*50)
-      print(f"Resultado {i} (score: {score:.2f}):")
-      print("="*50)
+    meta = doc.metadata or {}
+    page = meta.get("page")
+    source = meta.get("source", "")
 
-      print("\nTexto:\n")
-      print(doc.page_content.strip())
+    header = f"[Trecho {i}"
+    if page is not None:
+        header += f" - página {page}"
+    if source:
+        header += f" - {source}"
+    header += "]"
 
-      print("\nMetadados:\n")
-      for k, v in doc.metadata.items():
-          print(f"{k}: {v}")
-  return results
+    array_contexto.append(f"{header}\n{doc.page_content}")
+
+  contexto = "\n\n---\n\n".join(array_contexto)
+
+  # Gera resposta com LLM
+  prompt = PROMPT_TEMPLATE.format(contexto=contexto, pergunta=question)
+
+  try:
+    llm = ChatOpenAI(model="gpt-5-nano", temperature=0.5)
+    response = llm.invoke(prompt)
+
+    answer = response.content if hasattr(response, "content") else str(response)
+    return answer
+  except Exception as e:
+    return f"Erro ao consultar modelo: {e}"
